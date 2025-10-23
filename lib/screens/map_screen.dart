@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../services/supabase_service.dart';
 import '../services/gemini_service.dart';
 import '../models/place.dart';
@@ -16,10 +17,10 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   final SupabaseService supa = SupabaseService.instance;
   List<Place> places = [];
-  Set<Marker> markers = {};
   Place? selected;
   final _moodCtrl = TextEditingController();
   bool _searching = false;
+  final Map<String, String> _descriptions = {};
 
   @override
   void initState() {
@@ -29,42 +30,22 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _loadPlaces() async {
     final res = await supa.getPlaces();
-    setState(() {
-      places = res;
-      markers = res
-          .map(
-            (p) => Marker(
-              markerId: MarkerId(p.id),
-              position: LatLng(p.latitude, p.longitude),
-              infoWindow: InfoWindow(title: p.name),
-              onTap: () => setState(() => selected = p),
-            ),
-          )
-          .toSet();
-    });
+    setState(() => places = res);
   }
 
   Future<void> _searchByMood() async {
     final mood = _moodCtrl.text.trim();
     if (mood.isEmpty) return;
     setState(() => _searching = true);
-
-    // 1) Gemini interpreta mood -> keywords
     final keywords = await widget.gemini.interpretMoodToKeywords(mood);
-
-    // 2) Supabase busca lugares por keywords
     final found = await supa.searchPlacesByKeywords(keywords);
-
-    // 3) Para cada lugar, generar descripción personalizada
     final placesWithDesc = <Place>[];
     for (final pmap in found) {
-      // convertir a Map para pasarlo al servicio de Gemini
       final placeMap = pmap.toMap();
       final desc = await widget.gemini.generatePersonalizedDescription(
         placeMap,
         mood,
       );
-      // Creamos una instancia copia con imageUrl y category ya existentes y guardamos descripción en name temporalmente? Mejor: usar un campo transitorio.
       final copy = Place(
         id: pmap.id,
         name: pmap.name,
@@ -74,29 +55,14 @@ class _MapScreenState extends State<MapScreen> {
         imageUrl: pmap.imageUrl,
         createdAt: pmap.createdAt,
       );
-      // Usaremos un mapa de descripciones en el estado
       placesWithDesc.add(copy);
-      // Guardar descripción en un Map local
       _descriptions[copy.id] = desc;
     }
-
     setState(() {
       places = placesWithDesc;
-      markers = places
-          .map(
-            (p) => Marker(
-              markerId: MarkerId(p.id),
-              position: LatLng(p.latitude, p.longitude),
-              infoWindow: InfoWindow(title: p.name),
-              onTap: () => setState(() => selected = p),
-            ),
-          )
-          .toSet();
       _searching = false;
     });
   }
-
-  final Map<String, String> _descriptions = {};
 
   @override
   Widget build(BuildContext context) {
@@ -129,13 +95,40 @@ class _MapScreenState extends State<MapScreen> {
           Expanded(
             child: Stack(
               children: [
-                GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(0, 0),
-                    zoom: 2,
+                FlutterMap(
+                  options: MapOptions(
+                    initialCenter: places.isNotEmpty
+                        ? LatLng(places.first.latitude, places.first.longitude)
+                        : const LatLng(0, 0),
+                    initialZoom: 12,
+                    onTap: (_, __) => setState(() => selected = null),
                   ),
-                  markers: markers,
-                  myLocationEnabled: true,
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.tumapa',
+                    ),
+                    MarkerLayer(
+                      markers: places
+                          .map(
+                            (p) => Marker(
+                              point: LatLng(p.latitude, p.longitude),
+                              width: 40,
+                              height: 40,
+                              child: GestureDetector(
+                                onTap: () => setState(() => selected = p),
+                                child: const Icon(
+                                  Icons.location_on,
+                                  color: Colors.red,
+                                  size: 36,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
                 ),
                 if (selected != null)
                   Align(

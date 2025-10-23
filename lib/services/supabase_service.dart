@@ -1,58 +1,45 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/place.dart';
 
 class SupabaseService {
-  final SupabaseClient client = Supabase.instance.client;
+  static final SupabaseService instance = SupabaseService._internal();
+  SupabaseService._internal();
 
-  SupabaseService._();
-  static final SupabaseService instance = SupabaseService._();
+  static Future<void> initialize() async {
+    await dotenv.load(fileName: ".env");
 
-  /// Obtiene todos los lugares desde la tabla `places`.
+    final url = dotenv.env['SUPABASE_URL'];
+    final key = dotenv.env['SUPABASE_ANON_KEY'];
+
+    if (url == null || key == null) {
+      throw Exception("Supabase variables not found in .env");
+    }
+
+    await Supabase.initialize(url: url, anonKey: key);
+  }
+
+  final client = Supabase.instance.client;
+
+  Future<void> addPlace(Map<String, dynamic> data) async {
+    await client.from('places').insert(data);
+  }
+
   Future<List<Place>> getPlaces() async {
-    final res =
-        await client
-                .from('places')
-                .select()
-                .order('creando_en', ascending: false)
-            as List<dynamic>;
-    return res
-        .map(
-          (e) => Place.fromMap(
-            Map<String, dynamic>.from(e as Map<String, dynamic>),
-          ),
-        )
+    final res = await client.from('places').select();
+    return (res as List)
+        .map((e) => Place.fromMap(e as Map<String, dynamic>))
         .toList();
   }
 
-  /// Inserta un nuevo lugar. `payload` debe coincidir con los campos de la tabla.
-  Future<Place> addPlace(Map<String, dynamic> payload) async {
-    final res =
-        await client.from('places').insert(payload).select() as List<dynamic>;
-    if (res.isNotEmpty)
-      return Place.fromMap(
-        Map<String, dynamic>.from(res.first as Map<String, dynamic>),
-      );
-    throw Exception('Unexpected response from Supabase: $res');
-  }
-
-  /// Busca lugares por una lista de keywords (OR sobre name y category)
   Future<List<Place>> searchPlacesByKeywords(List<String> keywords) async {
-    if (keywords.isEmpty) return [];
-    // Construimos condición ilike para cada keyword
-    final query = keywords
-        .map(
-          (k) =>
-              "(name.ilike.*${k.replaceAll('%', '')}* OR category.ilike.*${k.replaceAll('%', '')}*)",
-        )
-        .join(',');
-    // Usamos raw filter concatenando con or
-    final res = await client.from('places').select().or(query) as List<dynamic>;
-    return res
-        .map(
-          (e) => Place.fromMap(
-            Map<String, dynamic>.from(e as Map<String, dynamic>),
-          ),
-        )
+    final query = client
+        .from('places')
+        .select()
+        .ilike('category', '%${keywords.join('%')}%');
+    final res = await query;
+    return (res as List)
+        .map((e) => Place.fromMap(e as Map<String, dynamic>))
         .toList();
   }
 }

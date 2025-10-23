@@ -40,7 +40,6 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
     final prompt =
         'Genera una descripción breve y categorías para el lugar llamado: ${_nameCtrl.text}';
     final desc = await widget.gemini.generateDescription(prompt);
-    // Aquí podríamos parsear categorías; por ahora colocamos en category
     _categoryCtrl.text = desc.split('\n').first;
   }
 

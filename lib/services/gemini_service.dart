@@ -1,51 +1,35 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class GeminiService {
-  final String apiKey;
-  GeminiService(this.apiKey);
+  final GenerativeModel _model;
 
-  /// Genera una descripción para un lugar dado coordenadas o texto.
+  GeminiService()
+    : _model = GenerativeModel(
+        model: 'gemini-2.5-pro',
+        apiKey: dotenv.env['GEMINI_API_KEY'] ?? '',
+      );
+
   Future<String> generateDescription(String prompt) async {
-    final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
-    final body = {
-      'model': 'gpt-4o-mini',
-      'messages': [
-        {'role': 'user', 'content': prompt},
-      ],
-      'max_tokens': 300,
-    };
-    final res = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      },
-      body: jsonEncode(body),
-    );
-    if (res.statusCode >= 400) throw Exception('Gemini API error: ${res.body}');
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    // Adaptar según la respuesta real de Gemini/OpenAI
-    final content =
-        (data['choices'] as List).first['message']['content'] as String;
-    return content;
+    final response = await _model.generateContent([Content.text(prompt)]);
+    return response.text ?? 'No description generated';
   }
 
-  /// Interpreta un estado emocional y devuelve una lista de keywords (ej: 'parque, naturaleza, tranquilo')
   Future<List<String>> interpretMoodToKeywords(String mood) async {
-    final prompt = 'Usuario dice: "$mood". Devuelve 5 keywords separadas por comas que describan tipos de lugares recomendables para ese estado (una sola línea, sin explicaciones).';
-    final raw = await generateDescription(prompt);
-    // intentar parsear por comas
-    final parts = raw.split(RegExp(r'[\n,]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-    return parts.take(5).toList();
+    final prompt =
+        'Given the mood "$mood", suggest 3 keywords related to places that could improve that mood.';
+    final response = await _model.generateContent([Content.text(prompt)]);
+    final text = response.text ?? '';
+    return text.split(RegExp(r'[,.\n]')).map((e) => e.trim()).toList();
   }
 
-  /// Genera una descripción personalizada para un lugar dado el estado emocional.
-  Future<String> generatePersonalizedDescription(Map<String, dynamic> place, String mood) async {
-    final name = place['name'] ?? 'Este lugar';
-    final category = place['category'] ?? '';
-    final prompt = 'Eres un asistente que sugiere lugares para bienestar. Usuario está: "$mood". Genera una descripción corta (1-2 frases) para el lugar "$name" (categoria: $category) que motive al usuario a visitarlo y explique por qué encaja con su estado emocional.';
-    final desc = await generateDescription(prompt);
-    return desc.trim();
+  Future<String> generatePersonalizedDescription(
+    Map<String, dynamic> place,
+    String mood,
+  ) async {
+    final prompt =
+        'Based on the mood "$mood", describe why visiting "${place['name']}" could be a good idea.';
+    final response = await _model.generateContent([Content.text(prompt)]);
+    return response.text ?? 'No personalized description available.';
   }
 }
